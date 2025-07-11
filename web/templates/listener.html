@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .music-player {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .listener-avatar {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+        }
+
+        .pulse-dot {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .now-playing-visual {
+            background: linear-gradient(45deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3);
+            background-size: 400% 400%;
+            animation: gradient 3s ease infinite;
+        }
+
+        @keyframes gradient {
+            0% {
+                background-position: 0% 50%;
+            }
+
+            50% {
+                background-position: 100% 50%;
+            }
+
+            100% {
+                background-position: 0% 50%;
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">🎧 {{.Room.name}}</h1>
+            <p class="text-gray-600">Listening Room</p>
+            <div class="flex items-center justify-center gap-2 mt-2">
+                <div class="pulse-dot w-3 h-3 bg-green-500 rounded-full"></div>
+                <span class="text-sm text-gray-500">Live</span>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div x-data="listenerApp()" class="max-w-4xl mx-auto">
+            <!-- Current Playing Section -->
+            <div class="music-player rounded-lg shadow-lg p-6 mb-6 text-white">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-2xl font-semibold">Now Playing</h2>
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm opacity-75">Listeners:</span>
+                        <div class="flex -space-x-2">
+                            <template x-for="listener in room.listeners" :key="listener.id">
+                                <div class="listener-avatar rounded-full border-2 border-white flex items-center justify-center text-sm font-semibold"
+                                    :title="listener.name" x-text="listener.name.charAt(0).toUpperCase()"></div>
+                            </template>
+                        </div>
+                        <span class="text-sm font-medium ml-2" x-text="room.listeners?.length || 0"></span>
+                    </div>
+                </div>
+
+                <template x-if="room.current_track">
+                    <div class="flex items-center gap-6">
+                        <!-- Album art placeholder with animated visual -->
+                        <div class="w-24 h-24 rounded-lg now-playing-visual flex items-center justify-center">
+                            <span class="text-3xl" x-show="room.current_track.is_video">🎥</span>
+                            <span class="text-3xl" x-show="!room.current_track.is_video">🎵</span>
+                        </div>
+
+                        <div class="flex-1">
+                            <h3 class="text-2xl font-bold" x-text="room.current_track.title"></h3>
+                            <p class="text-lg opacity-90" x-text="room.current_track.artist"></p>
+                            <p class="opacity-75" x-text="room.current_track.album"></p>
+
+                            <!-- Playback state indicator -->
+                            <div class="flex items-center gap-2 mt-2">
+                                <div class="flex items-center gap-1">
+                                    <span x-show="room.state === 'playing'" class="text-green-300">▶️ Playing</span>
+                                    <span x-show="room.state === 'paused'" class="text-yellow-300">⏸️ Paused</span>
+                                    <span x-show="room.state === 'stopped'" class="text-gray-300">⏹️ Stopped</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+
+                <template x-if="!room.current_track">
+                    <div class="text-center py-12">
+                        <div class="text-6xl mb-4">🎵</div>
+                        <p class="text-xl opacity-75">Waiting for the host to start playing music...</p>
+                        <p class="opacity-60 mt-2">Sit back and enjoy the ride!</p>
+                    </div>
+                </template>
+
+                <!-- Hidden Audio Player -->
+                <audio x-ref="audioPlayer" preload="none" @loadedmetadata="onAudioLoaded()" @timeupdate="onTimeUpdate()"
+                    @ended="onTrackEnded()" style="display: none;"></audio>
+
+                <!-- Progress Bar -->
+                <div class="mt-6" x-show="room.current_track">
+                    <div class="flex justify-between text-sm opacity-75 mb-2">
+                        <span x-text="formatTime(currentPosition)"></span>
+                        <span x-text="formatTime(room.current_track?.duration || 0)"></span>
+                    </div>
+                    <div class="w-full bg-white bg-opacity-20 rounded-full h-2">
+                        <div class="bg-white rounded-full h-2 transition-all duration-1000"
+                            :style="{ width: progressWidth + '%' }"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Join Room Section -->
+                <div class="bg-white rounded-lg shadow-md p-6" x-show="!hasJoined">
+                    <h2 class="text-xl font-semibold mb-4">Join the Listening Party</h2>
+                    <div class="space-y-4">
+                        <input x-model="userName" type="text" placeholder="Enter your name..."
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            @keyup.enter="joinRoom()">
+                        <button @click="joinRoom()"
+                            class="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-lg transition-colors">
+                            🎧 Join Listening Room
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Listeners Panel -->
+                <div class="bg-white rounded-lg shadow-md p-6" x-show="hasJoined">
+                    <h2 class="text-xl font-semibold mb-4">Who's Listening</h2>
+                    <div class="space-y-3 max-h-64 overflow-y-auto">
+                        <template x-for="listener in room.listeners" :key="listener.id">
+                            <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                                <div
+                                    class="listener-avatar rounded-full flex items-center justify-center text-sm font-semibold text-white">
+                                    <span x-text="listener.name.charAt(0).toUpperCase()"></span>
+                                </div>
+                                <div class="flex-1">
+                                    <span class="font-medium" x-text="listener.name"></span>
+                                    <span x-show="listener.role === 'host'"
+                                        class="ml-2 bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded">Host</span>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Room Info -->
+                <div class="bg-white rounded-lg shadow-md p-6 lg:col-span-2" x-show="hasJoined">
+                    <h2 class="text-xl font-semibold mb-4">Room Information</h2>
+                    <div class="grid grid-cols-2 gap-4 text-sm">
+                        <div class="bg-gray-50 p-3 rounded">
+                            <p class="text-gray-600">Room Status</p>
+                            <p class="font-medium capitalize" x-text="room.state"></p>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded">
+                            <p class="text-gray-600">Total Listeners</p>
+                            <p class="font-medium" x-text="room.listeners?.length || 0"></p>
+                        </div>
+                    </div>
+
+                    <!-- Share Room -->
+                    <div class="mt-4 pt-4 border-t border-gray-200">
+                        <p class="text-sm text-gray-600 mb-2">Invite others to join:</p>
+                        <div class="flex gap-2">
+                            <input type="text" :value="shareUrl" readonly
+                                class="flex-1 px-3 py-2 border border-gray-300 rounded text-sm bg-gray-50">
+                            <button @click="copyShareUrl()"
+                                class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-2 rounded text-sm">
+                                Copy
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function listenerApp() {
+            return {
+                room: JSON.parse('{{json .Room}}'),
+                roomId: '{{.RoomID}}',
+                userName: '',
+                hasJoined: false,
+                currentPosition: 0,
+                ws: null,
+                positionInterval: null,
+                userId: null,
+
+                init() {
+                    this.connectWebSocket();
+                    this.startPositionUpdater();
+                },
+
+                get progressWidth() {
+                    if (!this.room.current_track || !this.room.current_track.duration) return 0;
+                    return Math.min((this.currentPosition / this.room.current_track.duration) * 100, 100);
+                },
+
+                get shareUrl() {
+                    return window.location.href;
+                },
+
+                connectWebSocket() {
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/ws/${this.roomId}`;
+
+                    this.ws = new WebSocket(wsUrl);
+
+                    this.ws.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+                        const prevTrack = this.room.current_track;
+                        const prevState = this.room.state;
+
+                        this.room = data;
+                        this.updateCurrentPosition();
+
+                        // Handle audio playback changes
+                        this.handleAudioSync(prevTrack, prevState);
+                    };
+
+                    this.ws.onclose = () => {
+                        console.log('WebSocket connection closed');
+                        setTimeout(() => this.connectWebSocket(), 5000);
+                    };
+                },
+
+                handleAudioSync(prevTrack, prevState) {
+                    const audio = this.$refs.audioPlayer;
+                    const currentTrack = this.room.current_track;
+
+                    // Track changed - load new audio
+                    if (!prevTrack || !currentTrack || prevTrack.id !== currentTrack.id) {
+                        if (currentTrack) {
+                            audio.src = `/api/music/stream/${currentTrack.id}`;
+                            audio.load();
+
+                            // Wait for audio to load before syncing
+                            audio.addEventListener('loadeddata', () => {
+                                this.syncAudio();
+                            }, { once: true });
+                        } else {
+                            audio.pause();
+                            audio.src = '';
+                        }
+                        return;
+                    }
+
+                    // Same track, sync playback state
+                    this.syncAudio();
+                },
+
+                syncAudio() {
+                    const audio = this.$refs.audioPlayer;
+                    const targetPosition = this.room.position || 0;
+
+                    // Sync position if difference is significant (>2 seconds)
+                    if (Math.abs(audio.currentTime - targetPosition) > 2) {
+                        audio.currentTime = targetPosition;
+                    }
+
+                    // Sync play/pause state
+                    if (this.room.state === 'playing' && audio.paused) {
+                        audio.play().catch(e => console.log('Auto-play blocked:', e));
+                    } else if (this.room.state === 'paused' && !audio.paused) {
+                        audio.pause();
+                    }
+                },
+
+                startPositionUpdater() {
+                    this.positionInterval = setInterval(() => {
+                        if (this.room.state === 'playing') {
+                            this.currentPosition++;
+                        }
+                    }, 1000);
+                },
+
+                updateCurrentPosition() {
+                    this.currentPosition = this.room.position || 0;
+                },
+
+                onAudioLoaded() {
+                    console.log('Audio loaded successfully');
+                    this.syncAudio();
+                },
+
+                onTimeUpdate() {
+                    // Update local position from audio element
+                    const audio = this.$refs.audioPlayer;
+                    if (this.room.state === 'playing' && !audio.paused) {
+                        this.currentPosition = Math.floor(audio.currentTime);
+                    }
+                },
+
+                onTrackEnded() {
+                    console.log('Track ended');
+                },
+
+                async joinRoom() {
+                    if (!this.userName.trim()) {
+                        alert('Please enter your name');
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch(`/api/rooms/${this.roomId}/join`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                user_name: this.userName
+                            })
+                        });
+
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.userId = data.user_id;
+                            this.hasJoined = true;
+                        }
+                    } catch (error) {
+                        console.error('Error joining room:', error);
+                        alert('Error joining room');
+                    }
+                },
+
+                copyShareUrl() {
+                    navigator.clipboard.writeText(this.shareUrl).then(() => {
+                        // Could show a temporary success message
+                        alert('Share URL copied to clipboard!');
+                    });
+                },
+
+                formatTime(seconds) {
+                    if (!seconds) return '0:00';
+                    const minutes = Math.floor(seconds / 60);
+                    const remainingSeconds = seconds % 60;
+                    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>

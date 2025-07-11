@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <script src="https://unpkg.com/htmx.org@2.0.0"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .music-player {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .track-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .track-item {
+            transition: all 0.3s ease;
+        }
+
+        .listener-avatar {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">🎵 <span x-text="room.name"></span></h1>
+            <div class="flex items-center justify-center gap-4">
+                <p class="text-gray-600">Room Code: <span class="font-mono font-bold">{{.RoomID}}</span></p>
+                {{if .IsHost}}
+                <span class="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm">🎧 Host</span>
+                {{end}}
+            </div>
+            {{if .IsHost}}
+            <div class="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4 max-w-md mx-auto">
+                <p class="text-sm text-blue-700 mb-2">Share this room:</p>
+                <div class="flex gap-2">
+                    <input type="text" :value="shareUrl" readonly
+                        class="flex-1 px-3 py-2 border border-blue-300 rounded text-sm bg-white">
+                    <button @click="copyShareUrl()"
+                        class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded text-sm">
+                        Copy Link
+                    </button>
+                </div>
+            </div>
+            {{end}}
+        </div>
+
+        <!-- Main Content -->
+        <div x-data="roomApp()" class="max-w-6xl mx-auto">
+            <!-- Current Playing Section -->
+            <div class="music-player rounded-lg shadow-lg p-6 mb-6 text-white">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-2xl font-semibold">Now Playing</h2>
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm opacity-75">Listeners:</span>
+                        <div class="flex -space-x-2">
+                            <template x-for="listener in room.listeners" :key="listener.id">
+                                <div class="listener-avatar rounded-full border-2 border-white flex items-center justify-center text-sm font-semibold"
+                                    :title="listener.name" x-text="listener.name.charAt(0).toUpperCase()"></div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+
+                <template x-if="room.current_track">
+                    <div class="flex items-center gap-6">
+                        <div class="flex-1">
+                            <h3 class="text-xl font-semibold" x-text="room.current_track.title"></h3>
+                            <p class="text-lg opacity-90" x-text="room.current_track.artist"></p>
+                            <p class="opacity-75" x-text="room.current_track.album"></p>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            {{if .IsHost}}
+                            <button @click="togglePlayPause()"
+                                class="bg-white bg-opacity-20 hover:bg-opacity-30 rounded-full p-3 transition-all">
+                                <span x-show="room.state === 'playing'" class="text-2xl">⏸️</span>
+                                <span x-show="room.state !== 'playing'" class="text-2xl">▶️</span>
+                            </button>
+                            {{else}}
+                            <div class="flex items-center gap-2 text-sm opacity-75">
+                                <span x-show="room.state === 'playing'" class="text-green-300">▶️ Playing</span>
+                                <span x-show="room.state === 'paused'" class="text-yellow-300">⏸️ Paused</span>
+                                <span x-show="room.state === 'stopped'" class="text-gray-300">⏹️ Stopped</span>
+                            </div>
+                            {{end}}
+                        </div>
+                    </div>
+                </template>
+
+                <template x-if="!room.current_track">
+                    <div class="text-center py-8">
+                        <p class="text-xl opacity-75">No track playing</p>
+                        <p class="opacity-60">Select a track from the catalog below</p>
+                    </div>
+                </template>
+
+                <!-- Hidden Audio Player -->
+                <audio x-ref="audioPlayer" preload="none" @loadedmetadata="onAudioLoaded()" @timeupdate="onTimeUpdate()"
+                    @ended="onTrackEnded()" style="display: none;"></audio>
+
+                <!-- Progress Bar -->
+                <div class="mt-4">
+                    <div class="flex justify-between text-sm opacity-75 mb-1">
+                        <span x-text="formatTime(currentPosition)"></span>
+                        <span x-text="formatTime(room.current_track?.duration || 0)"></span>
+                    </div>
+                    <div class="w-full bg-white bg-opacity-20 rounded-full h-2">
+                        <div class="bg-white rounded-full h-2 transition-all duration-1000"
+                            :style="{ width: progressWidth + '%' }"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Music Catalog -->
+                <div class="lg:col-span-2 bg-white rounded-lg shadow-md p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-2xl font-semibold">Music Catalog</h2>
+                        <div class="text-sm text-gray-500 bg-blue-50 px-2 py-1 rounded">
+                            🎥 Video files play audio-only
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <input x-model="searchQuery" type="text" placeholder="Search tracks..."
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div class="grid gap-3 max-h-96 overflow-y-auto">
+                        <template x-for="track in filteredTracks" :key="track.id">
+                            <div
+                                class="track-item bg-gray-50 rounded-lg p-3 flex items-center justify-between hover:bg-gray-100">
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-2">
+                                        <h3 class="font-medium text-gray-800" x-text="track.title"></h3>
+                                        <span x-show="track.is_video"
+                                            class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded"
+                                            title="Video file - audio only">🎥</span>
+                                    </div>
+                                    <p class="text-sm text-gray-600" x-text="track.artist"></p>
+                                </div>
+                                {{if .IsHost}}
+                                <button @click="playTrack(track)"
+                                    class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm transition-colors">
+                                    Play
+                                </button>
+                                {{else}}
+                                <span class="text-gray-400 text-sm px-3 py-1">Host controls playback</span>
+                                {{end}}
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Room Info & Controls -->
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <h2 class="text-xl font-semibold mb-4">Room Controls</h2>
+
+                    <!-- Join Room -->
+                    <div x-show="!hasJoined" class="mb-4">
+                        <input x-model="userName" type="text" placeholder="Your name..."
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <button @click="joinRoom()"
+                            class="w-full bg-green-500 hover:bg-green-600 text-white py-2 rounded-lg transition-colors">
+                            Join Room
+                        </button>
+                    </div>
+
+                    <!-- Listeners List -->
+                    <div x-show="hasJoined">
+                        <h3 class="font-semibold mb-3">Listeners</h3>
+                        <div class="space-y-2">
+                            <template x-for="listener in room.listeners" :key="listener.id">
+                                <div class="flex items-center gap-2 p-2 bg-gray-50 rounded">
+                                    <div
+                                        class="listener-avatar rounded-full flex items-center justify-center text-sm font-semibold text-white">
+                                        <span x-text="listener.name.charAt(0).toUpperCase()"></span>
+                                    </div>
+                                    <span x-text="listener.name"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Room Stats -->
+                    <div class="mt-6 pt-4 border-t border-gray-200">
+                        <div class="text-sm text-gray-600 space-y-1">
+                            <p>Status: <span class="font-medium" x-text="room.state"></span></p>
+                            <p>Listeners: <span class="font-medium" x-text="room.listeners?.length || 0"></span></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function roomApp() {
+            return {
+                room: {{.Room | json}},
+                roomId: '{{.RoomID}}',
+                isHost: {{.IsHost}},
+                hostId: '{{.HostID}}',
+                tracks: [],
+                searchQuery: '',
+                userName: '',
+                hasJoined: {{.IsHost}}, // Hosts are automatically joined
+                currentPosition: 0,
+                ws: null,
+                positionInterval: null,
+                audioSyncTimeout: null,
+                userId: '{{.HostID}}', // Set to host ID if host
+
+                init() {
+                    this.loadTracks();
+                    this.connectWebSocket();
+                    this.startPositionUpdater();
+                },
+
+                get shareUrl() {
+                    return `${window.location.origin}/listen/${this.roomId}`;
+                },
+                
+                get filteredTracks() {
+                    if (!this.searchQuery) return this.tracks;
+                    return this.tracks.filter(track =>
+                        track.title.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
+                        track.artist.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
+                        track.album.toLowerCase().includes(this.searchQuery.toLowerCase())
+                    );
+                },
+                
+                get progressWidth() {
+                    if (!this.room.current_track || !this.room.current_track.duration) return 0;
+                    return Math.min((this.currentPosition / this.room.current_track.duration) * 100, 100);
+                },
+                
+                async loadTracks() {
+                    try {
+                        const response = await fetch('/api/music/catalog');
+                        this.tracks = await response.json();
+                    } catch (error) {
+                        console.error('Error loading tracks:', error);
+                    }
+                },
+
+                connectWebSocket() {
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/ws/${this.roomId}?user_id=${this.userId}`;
+
+                    this.ws = new WebSocket(wsUrl);
+
+                    this.ws.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+                        const prevTrack = this.room.current_track;
+                        const prevState = this.room.state;
+
+                        this.room = data;
+                        this.updateCurrentPosition();
+
+                        // Handle audio playback changes
+                        this.handleAudioSync(prevTrack, prevState);
+                    };
+
+                    this.ws.onclose = () => {
+                        console.log('WebSocket connection closed');
+                        setTimeout(() => this.connectWebSocket(), 5000);
+                    };
+                },
+
+                handleAudioSync(prevTrack, prevState) {
+                    const audio = this.$refs.audioPlayer;
+                    const currentTrack = this.room.current_track;
+
+                    // Track changed - load new audio
+                    if (!prevTrack || !currentTrack || prevTrack.id !== currentTrack.id) {
+                        if (currentTrack) {
+                            audio.src = `/api/music/stream/${currentTrack.id}`;
+                            audio.load();
+
+                            // Wait for audio to load before syncing
+                            const onLoaded = () => {
+                                audio.removeEventListener('loadeddata', onLoaded);
+                                this.syncAudio();
+                            };
+                            audio.addEventListener('loadeddata', onLoaded);
+                        } else {
+                            audio.pause();
+                            audio.src = '';
+                        }
+                        return;
+                    }
+
+                    // Same track, sync playback state
+                    this.syncAudio();
+                },
+
+                syncAudio() {
+                    const audio = this.$refs.audioPlayer;
+                    const targetPosition = this.room.position || 0;
+
+                    // Clear any existing sync timeout
+                    if (this.audioSyncTimeout) {
+                        clearTimeout(this.audioSyncTimeout);
+                    }
+
+                    // Only sync if audio is loaded
+                    if (audio.readyState >= 2) { // HAVE_CURRENT_DATA
+                        // Sync position if difference is significant (>2 seconds)
+                        if (Math.abs(audio.currentTime - targetPosition) > 2) {
+                            audio.currentTime = targetPosition;
+                        }
+
+                        // Sync play/pause state
+                        if (this.room.state === 'playing' && audio.paused) {
+                            const playPromise = audio.play();
+                            if (playPromise !== undefined) {
+                                playPromise.catch(e => console.log('Auto-play blocked:', e));
+                            }
+                        } else if (this.room.state === 'paused' && !audio.paused) {
+                            audio.pause();
+                        }
+                    } else {
+                        // Retry sync when audio is ready
+                        this.audioSyncTimeout = setTimeout(() => this.syncAudio(), 100);
+                    }
+                },
+
+                startPositionUpdater() {
+                    this.positionInterval = setInterval(() => {
+                        if (this.room.state === 'playing') {
+                            this.currentPosition++;
+                        }
+                    }, 1000);
+                },
+
+                updateCurrentPosition() {
+                    this.currentPosition = this.room.position || 0;
+                },
+
+                onAudioLoaded() {
+                    console.log('Audio loaded successfully');
+                    this.syncAudio();
+                },
+
+                onTimeUpdate() {
+                    // Update local position from audio element
+                    const audio = this.$refs.audioPlayer;
+                    if (this.room.state === 'playing' && !audio.paused) {
+                        this.currentPosition = Math.floor(audio.currentTime);
+                    }
+                },
+
+                onTrackEnded() {
+                    console.log('Track ended');
+                    // Could implement auto-advance to next track here
+                },
+                
+                async joinRoom() {
+                    if (!this.userName.trim()) {
+                        alert('Please enter your name');
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch(`/api/rooms/${this.roomId}/join`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                user_name: this.userName
+                            })
+                        });
+
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.userId = data.user_id;
+                            this.hasJoined = true;
+                        }
+                    } catch (error) {
+                        console.error('Error joining room:', error);
+                        alert('Error joining room');
+                    }
+                },
+                
+                async playTrack(track) {
+                    if (!this.isHost) {
+                        alert('Only the host can control playback');
+                        return;
+                    }
+
+                    try {
+                        await fetch(`/api/rooms/${this.roomId}/play`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                track_id: track.id,
+                                user_id: this.userId
+                            })
+                        });
+                    } catch (error) {
+                        console.error('Error playing track:', error);
+                    }
+                },
+                
+                async togglePlayPause() {
+                    if (!this.isHost) {
+                        alert('Only the host can control playback');
+                        return;
+                    }
+
+                    try {
+                        const endpoint = this.room.state === 'playing' ? 'pause' : 'resume';
+                        await fetch(`/api/rooms/${this.roomId}/${endpoint}`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                user_id: this.userId
+                            })
+                        });
+                    } catch (error) {
+                        console.error('Error toggling playback:', error);
+                    }
+                },
+
+                copyShareUrl() {
+                    navigator.clipboard.writeText(this.shareUrl).then(() => {
+                        alert('Share link copied to clipboard!');
+                    });
+                },
+
+                formatTime(seconds) {
+                    if (!seconds) return '0:00';
+                    const minutes = Math.floor(seconds / 60);
+                    const remainingSeconds = seconds % 60;
+                    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>
