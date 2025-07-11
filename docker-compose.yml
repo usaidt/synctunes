@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  synctunes:
+    image: usaidt/synctunes:latest
+    build: .
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - MUSIC_DIR=/app/music
+    volumes:
+      - ./music:/app/music
+    restart: unless-stopped
+
+volumes:
+  music_data:
